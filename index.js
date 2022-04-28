@@ -2,12 +2,31 @@ const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
+var jwt = require("jsonwebtoken");
 const app = express();
 const port = process.env.PORT || 5000;
 
 // middleware
 app.use(cors());
 app.use(express.json());
+
+function verifyJWT(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).send({ message: "Unauthorized access" });
+  }
+  const token = authHeader.split(" ")[1];
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    if (err) {
+      console.log(token);
+      return res.status(403).send({ message: "Forbidden access" });
+    } else {
+      console.log("decoded", decoded);
+      req.decoded = decoded;
+      next();
+    }
+  });
+}
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.z64ff.mongodb.net/myFirstDatabase?retryWrites=true&w=majority`;
 const client = new MongoClient(uri, {
@@ -22,7 +41,18 @@ async function run() {
     const serviceCollection = client
       .db("geniusCarService")
       .collection("service");
+    const orderCollection = client.db("geniusCarService").collection("order");
 
+    // ---------------- AUTH -------------------- //
+    app.post("/login", async (req, res) => {
+      const user = req.body;
+      const accessToken = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+        expiresIn: "1d",
+      });
+      res.send({ accessToken });
+    });
+
+    // ---------------- SERVICE API -------------------- //
     // GET
     app.get("/service", async (req, res) => {
       const query = {};
@@ -52,6 +82,28 @@ async function run() {
       const filterQuery = { _id: ObjectId(id) };
       const result = await serviceCollection.deleteOne(filterQuery);
       res.send(result);
+    });
+
+    // ---------------- ORDER API -------------------- //
+    // Order POST
+    app.post("/order", async (req, res) => {
+      const order = req.body;
+      const result = await orderCollection.insertOne(order);
+      res.send(result);
+    });
+    // Order GET
+    app.get("/order", verifyJWT, async (req, res) => {
+      const decodedEmail = req.decoded.email;
+      const userEmail = req.query.email;
+      console.log(decodedEmail, userEmail);
+      if (userEmail === decodedEmail) {
+        const query = { email: userEmail };
+        const cursor = orderCollection.find(query);
+        const orders = await cursor.toArray();
+        res.send(orders);
+      } else {
+        res.status(403).send({ message: "Forbidden Access" });
+      }
     });
   } finally {
   }
